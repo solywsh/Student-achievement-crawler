@@ -1,12 +1,17 @@
 import time
 import datetime #获得日期的时候使用
-import requests
+
 import pprint as pp
 import re
 import math
-from bs4 import BeautifulSoup
+
 from pymysql import *
 from pathlib import Path #判断路径文件是否存在
+
+import requests
+import bs4 #isinstance(tr,bs4.element.Tag)
+from bs4 import BeautifulSoup
+
 
 ###########################################################################
 # 一些与业务不相关的函数
@@ -28,6 +33,18 @@ def progress(percent, width=50):
 
     if percent == 100:
         print('\n')
+
+def print_time(time_beg, time_now, i, len):
+
+
+    tmep_time = datetime.datetime.strptime('00:00:00','%H:%M:%S')
+    persent = i/len
+    delta = time_now - time_beg
+    remnant = delta/persent - delta
+    delta = tmep_time + delta
+    remnant = tmep_time + remnant
+    print(' %s  预计还剩: %s' % (delta.strftime('%H:%M:%S'),remnant.strftime('%H:%M:%S')))
+
 
 
 def waiting(times=3, sec=1, max_symbol_num=5):
@@ -384,7 +401,6 @@ def get_asc_id(_database_info):
         print("数据库连接发生错误,请检查数据库配置!")
         return 0
 
-
 def cut_asc_id(_sac_id_list,step=20):
     '''
     切片asc_id,每组以字符的形式传入列表
@@ -424,7 +440,6 @@ def cut_asc_id(_sac_id_list,step=20):
 
 
     return sac_ids
-
 
 def get_detailed_table_html(cookie,sac_ids_str):
     url = "http://jwxt.xsyu.edu.cn/eams/teach/grade/transcript/printer!report.action"
@@ -466,45 +481,213 @@ def get_detailed_table_html(cookie,sac_ids_str):
         print("网页解析错误!")
         return 404
 
-def get_detailed_table_info(cookie,asc_ids):
-    # print("正在抓取学生成绩详细情况...")
-    # for asc_id in asc_ids:
-    #     html = get_detailed_table_html(cookie,asc_id)
-    #     soup = BeautifulSoup(html, 'html.parser')
-    #     soup.h2.string
-    #
-    #     print("写入文件...")
-    #     with open(r'./总表.html', 'w', encoding='utf-8') as file_object:
-    #         file_object.write(html)
-    #     file_object.close()
-    #     print("写入完成...")
-    html = read_html()
+def get_stu_basic_info(html):
+    '''
+    获得表格中学生的学号stuid，姓名name，班级class
+
+    :param html: 传入的网页，建议为文本
+    :return: 返回信息的字典
+    '''
     soup = BeautifulSoup(html, 'html.parser')
-    soup = soup.body.contents
+    _list = []
+    for child in soup.find_all('td'):
+        _list.append(str(child))
+    try:
+        class_ = re.search(r"[^(<td>)(</td>)(班级:)]+", _list[2]).group(0)
+    except:
+        class_ = ''
+    basic_info = {
+        "stuid": re.search(r"[^(<td>)(</td>)(学号:)]+", _list[0]).group(0),
+        "name": re.search(r"[^(<td>)(</td>)(姓名:)]+", _list[1]).group(0),
+        "class": class_
+    }
+    return basic_info
 
-    flag = 0
-    for content in soup:
-        if content.string == "西安石油大学学生成绩总表":
-            print(content.string)
+
+def get_stu_detail_info(html):
+    soup = BeautifulSoup(html, 'html.parser')
+
+    detail_info = [] #用来存储学生所有信息
+    flag = 0 #标识排除第一行信息
+    semester = "" #标志学期
+    for child in soup.find_all('tr'):
+        if flag == 0:
             flag = 1
-        else:
-            if flag == 1:
-                # 这里是学生基本信息
-                print("学生信息{}".format(flag))
-                pp.pprint(content)
-                print("----------------------")
-            if flag == 2:
-                print("学生成绩{}".format(flag))
-                pp.pprint(content)
-                print("----------------------")
-            flag = flag + 1
+            continue #跳过表格第一个
+
+        _list = [] # 定义一个临时的列表用来存储信息
+        for td in child.find_all('td'):
+            _list.append(str(td.string).replace("\n","").replace("\t","").replace("\r",""))
+
+        try:
+            # 选出课程病编号,例如：A010340
+            courses_id = re.search(r"\([A-Z][0-9]+\)", _list[1]).group(0)
+            # 判断学年字段
+            if _list[0] == '\xa0':
+                _list[0] = semester
+            else:
+                semester = _list[0]
+
+            _info = {
+                "school_year": _list[0], #学期学年
+                "courses_id": courses_id.replace("(","").replace(")",""), #课程/环节 id
+                "courses": _list[1].replace(courses_id,""), #课程/环节 名称
+                "courses_p": _list[2], #课程/环节 性质
+                "score": _list[3], #分数、等级
+                "credit": float(_list[4]), #学分
+                "gp": float(_list[5]), #绩点
+                "ac": float(_list[6]), #学分绩点
+                "nos": _list[7], #修读性质
+                "remark": _list[8].replace(" ",""), #备注
+            }
+            detail_info.append(_info)
+        except:
+            pass
+
+    return detail_info
 
 
+def insert_detail_database(_lists,_database_info):
+    '''
+    将学生详细信息的列表写入数据库
+
+    :param _lists: 写入学生信息的列表
+    :param _database_info: 数据库基本信息
 
 
+    _database_info格式:
+        _databsae_info = {
+            'host':'XXX.XXX.XXX.XXX', #主机
+
+            'port':3306, #端口
+
+            'database':'XXXX',#数据库名称
+
+            'user':'XXXXX',#用户名
+
+            'password':'XXXXX',#密码
+
+            'charset':'utf8' #字符编码
+        }
+
+    :return: 正常返回0，写入发生异常返回-1
+    '''
+    try:
+        # 创建Connection连接
+        conn = connect(host=_database_info['host'], port= _database_info['port'],
+                       database=_database_info['database'],user=_database_info['user'],
+                       password=_database_info['password'],charset=_database_info['charset'])
+        cs1 = conn.cursor()# 获得Cursor对象
+        i = 1
+        _len = len(_lists)
+        #定义sql语句模版
+        print("正在插入数据库...")
+        sql = "insert into students_detailed_table values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        for _list in _lists:
+            # 拆分课程
+            for courses in _list["stu_detail_info"]:
+                try:
+                    param = ("default",
+                             _list["stu_basic_info"]["stuid"],
+                             _list["stu_basic_info"]["name"],
+                             _list["stu_basic_info"]["class"],
+                             courses["school_year"],
+                             courses["courses_id"],
+                             courses["courses"],
+                             courses["courses_p"],
+                             courses["score"],
+                             courses["credit"],
+                             courses["gp"],
+                             courses["ac"],
+                             courses["nos"],
+                             courses["remark"],
+                             )
+                    #print(param)
+                    count = cs1.execute(sql, param)
+                except:
+                    print("写入数据库发生错误,可能主键冲突！自动跳过这条信息")
+                    continue
+            # 打印进度
+            percent = i / _len
+            i = i + 1
+            progress(percent)
+        print("提交数据库...")
+        conn.commit()  # 提交之前的操作，如果之前已经之执行过多次的execute，那么就都进行提交
+        cs1.close()# 关闭Cursor对象
+        conn.close()# 关闭Connection对象
+    except:
+        print("数据库发生错误！请检查填写的信息！\n")
+        return -1
+    print("提交成功")
     return 0
 
 
+
+
+def get_detailed_table_info(cookie,asc_ids,database_info):
+    print("正在抓取学生成绩详细情况,会有多轮解析网页和数据库操作，时间会很长请去干别的事情")
+    waiting(5)
+    i = 1
+    _len = len(asc_ids)
+    time_beg = datetime.datetime.now()
+    for asc_id in asc_ids:
+
+        print("正在请求网页...")
+        html = get_detailed_table_html(cookie,asc_id)
+        if html == 404:
+            print("请求失败!")
+            return 0
+        soup = BeautifulSoup(html, 'html.parser')
+
+        # 测试用
+        # html = read_html()
+        # soup = BeautifulSoup(html, 'html.parser')
+        soup = soup.body.contents
+
+        flag = 0
+        sbi_dict = {}
+        sdi_list = []
+        all_list = []
+        print("正在解析网页信息...")
+        for content in soup:
+            if content.string == "西安石油大学学生成绩总表":
+                flag = 1
+                continue
+            if flag == 1:
+                # 由于学生基本信息和成绩都紧挨着标题“西安石油大学学生成绩总表”，并且类型都为bs4.element.Tag
+                # 我们用这种方式将其区分
+                if isinstance(content,bs4.element.Tag):
+                    # 这里是学生基本信息
+                    sbi_dict = get_stu_basic_info(str(content))
+                    flag = 2
+                    continue
+            if flag == 2:
+                if isinstance(content,bs4.element.Tag):
+                    # 这里是学生的详细的信息
+                    sdi_list = get_stu_detail_info(str(content))
+                    flag = 0
+            # 将这个学生的所有信息汇总到一个表里边
+            if len(sdi_list)!= 0 and len(sbi_dict) != 0:
+                all_info = {
+                    "stu_basic_info" : sbi_dict,
+                    "stu_detail_info" : sdi_list
+                }
+                all_list.append(all_info)
+        # 插入数据库
+        print("解析完成")
+        insert_detail_database(all_list,database_info)
+
+        percent = i / _len
+        i = i + 1
+        print("总进度:")
+        progress(percent)
+        time_now = datetime.datetime.now()
+        print_time(time_beg,time_now,i,_len)
+
+
+
+
+# 读取本地文件,测试用
 def read_html(path=r'./总表.html'):
     my_file = Path(path)
     if my_file.is_file():
@@ -544,17 +727,14 @@ def xsyu_detailed(cookie, database_info):
     :return:暂时返回0
     '''
 
-    # 先取得asc_id列表
-    # asc_list = get_asc_id(database_info)
-    # # 切片分组
-    # if asc_list != 0:
-    #     # 此时asc_list格式已经转换
-    #     asc_list = cut_asc_id(asc_list)
-    #     get_detailed_table_info(cookie,asc_list)
-    #
-    # else:
-    #     return 0
+    #先取得asc_id列表
+    asc_list = get_asc_id(database_info)
+    # 切片分组
+    if asc_list != 0:
+        # 此时asc_list格式已经转换
+        asc_list = cut_asc_id(asc_list)
+        get_detailed_table_info(cookie, asc_list, database_info)
+    else:
+        return 0
 
-    temp = 0
-    temp_1 = 0
-    get_detailed_table_info(temp,temp_1)
+
