@@ -133,5 +133,5 @@ dmypy.json
 # 我自己添加的
 .idea/
 .run/
-123.html
-总表.html
+data/html/
+data/list/

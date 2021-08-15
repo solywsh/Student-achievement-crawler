@@ -1,16 +1,23 @@
+import json
 import time
 import datetime #获得日期的时候使用
-
+import multiprocessing as mp #多进程
+from multiprocessing import Pool
 import pprint as pp
 import re
 import math
-
+import os
 from pymysql import *
 from pathlib import Path #判断路径文件是否存在
-
+import random #用来生成随机数
+# 爬虫请求时需要的库
 import requests
 import bs4 #isinstance(tr,bs4.element.Tag)
 from bs4 import BeautifulSoup
+# 将python的requests库协议改为HTTP/1.0 ，使用HTTP/1.1教务系统可能会发生不兼容的情况
+import http.client
+http.client.HTTPConnection._http_vsn = 10
+http.client.HTTPConnection._http_vsn_str = 'HTTP/1.0'
 
 
 ###########################################################################
@@ -18,34 +25,78 @@ from bs4 import BeautifulSoup
 ###########################################################################
 
 
-def progress(percent, width=50):
+def progress(place, end_place, time_str="", width=50):
     '''
     打印进度条
 
-    :param percent: 进度百分比
-    :param width: 进度条宽,默认50
+    :param place: 目前的进度位置，类型为数字，不能为0
+    :param end_place: 结束位置，类型为数字
+    :param time_str: 可选择打印实花费时间和剩余时间，建议配合get_remaining_time使用
+    :param width: 进度条宽度
+
     '''
+    percent = place / end_place
     percent = percent * 100
     if percent >= 100:
         percent = 100
     show_str = ('[%%-%ds]' % width) % (int(width * percent / 100) * "#")  # 字符串拼接的嵌套使用
-    print('\r%s %.2f%%' % (show_str, percent), end='')
+    print('\r%s %.2f%% %s' % (show_str, percent , time_str), end='')
 
     if percent == 100:
         print('\n')
 
-def print_time(time_beg, time_now, i, len):
+def print_remaining_time(time_beg, time_now, place, end_place):
+    '''
+    直接打印花费时间，剩余时间按
 
+    :param time_beg: 开始的时间，time_beg = datetime.datetime.now()获得
+    :param time_now: 现在的时间，time_now = datetime.datetime.now()获得
+    :param place: 现在进度的位置，类型为数字，不能为0
+    :param end_place: 结束的位置，类型为数字
+    :return:
+    '''
+    #
 
+    # 定义空时间
     tmep_time = datetime.datetime.strptime('00:00:00','%H:%M:%S')
-    persent = i/len
+    # 计算进度
+    persent = place / end_place
+    # 计算花费时间
     delta = time_now - time_beg
+    # 计算剩余时间
     remnant = delta/persent - delta
+    # 格式化花费时间
     delta = tmep_time + delta
+    # 格式化剩余时间
     remnant = tmep_time + remnant
-    print(' %s  预计还剩: %s' % (delta.strftime('%H:%M:%S'),remnant.strftime('%H:%M:%S')))
+    print('\r %s  预计还剩: %s' % (delta.strftime('%H:%M:%S'),remnant.strftime('%H:%M:%S')),end='')
 
+def get_remaining_time(time_beg, time_now, place, end_place):
+    '''
+    返回花费时间，剩余时间按
 
+    :param time_beg: 开始的时间，time_beg = datetime.datetime.now()获得
+    :param time_now: 现在的时间，time_now = datetime.datetime.now()获得
+    :param place: 现在进度的位置，类型为数字，不能为0
+    :param end_place: 结束的位置，类型为数字
+    :return:
+    '''
+
+    # 定义空时间
+    tmep_time = datetime.datetime.strptime('00:00:00', '%H:%M:%S')
+    # 计算进度
+    persent = place / end_place
+    # 计算花费时间
+    delta = time_now - time_beg
+    # 计算剩余时间
+    remnant = delta / persent - delta
+    # 格式化花费时间
+    delta = tmep_time + delta
+    # 格式化剩余时间
+    remnant = tmep_time + remnant
+
+    rst = ' 花费: %s  预计还剩: %s' % (delta.strftime('%H:%M:%S'),remnant.strftime('%H:%M:%S'))
+    return rst
 
 def waiting(times=3, sec=1, max_symbol_num=5):
     '''
@@ -63,7 +114,6 @@ def waiting(times=3, sec=1, max_symbol_num=5):
             symbol = '.'
         time.sleep(1)
     print('\n')
-
 
 def waiting_s(percent,
               words='',max_symbol_num=4,symbol='.'):
@@ -131,7 +181,6 @@ def get_page_num(html,pageSize=100):
         print("网页404！")
         return 404
 
-
 def get_summary_table_html(cookie,pageNO=1,pageSize=20):
     '''
     解析学生汇总信息网页
@@ -167,7 +216,6 @@ def get_summary_table_html(cookie,pageNO=1,pageSize=20):
         return r.text
     except:
         return 404
-
 
 def get_summary_table_info(html):
     '''
@@ -210,29 +258,12 @@ def get_summary_table_info(html):
         print("访问过快，触发教务系统限制:请不要过快点击")
         return 0
 
-
 def insert_summary_database(_lists, _database_info):
     '''
     将学生汇总信息的列表写入数据库
 
     :param _lists: 写入学生信息的列表
     :param _database_info: 数据库基本信息
-
-
-    _database_info格式:
-        _databsae_info = {
-            'host':'XXX.XXX.XXX.XXX', #主机
-
-            'port':3306, #端口
-
-            'database':'XXXX',#数据库名称
-
-            'user':'XXXXX',#用户名
-
-            'password':'XXXXX',#密码
-
-            'charset':'utf8' #字符编码
-        }
 
     :return: 正常返回0，写入发生异常返回-1
     '''
@@ -254,13 +285,11 @@ def insert_summary_database(_lists, _database_info):
                          _list["grede"], _list["faculty"], _list["major"], _list["_class"], _list["prof_d"])
                 count = cs1.execute(sql, param)
                 # 打印进度
-                percent = i / _len
                 i = i + 1
-                progress(percent)
+                progress(i,_len)
             except:
                 print("写入数据库发生错误,可能主键冲突！自动跳过这条信息")
                 continue
-        print('\n')
         conn.commit()  # 提交之前的操作，如果之前已经之执行过多次的execute，那么就都进行提交
         cs1.close()# 关闭Cursor对象
         conn.close()# 关闭Connection对象
@@ -269,7 +298,6 @@ def insert_summary_database(_lists, _database_info):
         return -1
 
     return 0
-
 
 def xsyu_summary(cookie, database_info,
                  get_table=True, insert_table=True):
@@ -315,10 +343,8 @@ def xsyu_summary(cookie, database_info,
                 list_temp = get_summary_table_info(summary_table_html)
                 lists = lists + list_temp
                 #打印进度
-                percent  = i / page_rst['page_num']
-                progress(percent)
+                progress(i,page_rst['page_num'])
                 time.sleep(0.1)
-            print('\n')
             #如果不写入数据库就返回信息的列表_list
             if insert_table == True and lists != 0:
                 insert_summary_database(lists, database_info)
@@ -329,12 +355,23 @@ def xsyu_summary(cookie, database_info,
 
 
 
-
-
-
 ###########################################################################
 # 以下为学生成绩详细信息相关函数
 ###########################################################################
+
+def do_not_access_fast(html):
+    '''
+    "请不要过快点击",顾名思义，请求过快得到的网页为”请不要过快点击“，内容为空的，需要等会儿重新请求
+
+    :param html:
+    :return:
+    '''
+    rst = re.search(r"请不要过快点击", html)
+    if rst == None:
+        return 0
+    else:
+        time.sleep(4)
+        return -1
 
 
 
@@ -343,22 +380,6 @@ def get_asc_id(_database_info):
     在数据库查询每个人的
 
     :param _database_info: 数据库信息
-
-    _database_info格式:
-        _databsae_info = {
-            'host':'XXX.XXX.XXX.XXX', #主机
-
-            'port':3306, #端口
-
-            'database':'XXXX',#数据库名称
-
-            'user':'XXXXX',#用户名
-
-            'password':'XXXXX',#密码
-
-            'charset':'utf8' #字符编码
-        }
-
     :return: ,返回asc_id列表,查询失败返回0
     '''
     try:
@@ -383,8 +404,7 @@ def get_asc_id(_database_info):
                     asc_id_list.append(result[0])
 
                     # 打印进度
-                    percent = (i+1) / count
-                    progress(percent)
+                    progress(i+1,count)
 
                 # 关闭Cursor对象
                 cs1.close()
@@ -435,23 +455,32 @@ def cut_asc_id(_sac_id_list,step=20):
         end = end + step
 
         # 打印进度
-        percent = i / cut_num
-        progress(percent)
+        progress(i,cut_num)
 
 
     return sac_ids
 
 def get_detailed_table_html(cookie,sac_ids_str):
+    '''
+    请求学生详细网页
+
+    :param cookie: 管理员账号的cookie
+    :param sac_ids_str: sac id,一次应该是100个,提前转换成字符
+
+    :return: 如果请求成功返回网页内容,失败则返回404
+    '''
     url = "http://jwxt.xsyu.edu.cn/eams/teach/grade/transcript/printer!report.action"
     headers = {
         'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
         'Cache-Control': 'max-age=0',
         'Connection': 'keep-alive',
-        'cookie': cookie,
+        'Cookie': cookie,
         'Upgrade-Insecure-Requests': '1',
-        'host': 'jwxt.xsyu.edu.cn',
-        'user-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36 Edg/92.0.902.67'
+        'Host': 'jwxt.xsyu.edu.cn',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36 Edg/92.0.902.67',
+        'Referer':'http://jwxt.xsyu.edu.cn/eams/teach/grade/transcript/printer!stdList.action',
+        'Content-Length':'570'
     }
     # 得到发送的日期
     postime = get_time()
@@ -472,13 +501,18 @@ def get_detailed_table_html(cookie,sac_ids_str):
         'std.ids': sac_ids_str
     }
     try:
-        s = requests.session()
-        r = s.post(url,data=Hpostdata, headers=headers)
-        r.raise_for_status()  # 如果不是返回状态码200，则产生异常
-        r.encoding = 'utf-8'
-        return r.text
+        while(True):
+            s = requests.session()
+            r = s.post(url,data=Hpostdata, headers=headers,stream=True)
+            r.raise_for_status()  # 如果不是返回状态码200，则产生异常
+            r.encoding = 'utf-8'
+            # 防止访问过快
+            if do_not_access_fast(r.text) != 0:
+                continue
+            else:
+                return r.text
     except:
-        print("网页解析错误!")
+        print("\n网页解析错误!")
         return 404
 
 def get_stu_basic_info(html):
@@ -503,8 +537,13 @@ def get_stu_basic_info(html):
     }
     return basic_info
 
-
 def get_stu_detail_info(html):
+    '''
+    解析网页内容,洗数据
+
+    :param html: 网页文本
+    :return: 返回解析完成得到的内容
+    '''
     soup = BeautifulSoup(html, 'html.parser')
 
     detail_info = [] #用来存储学生所有信息
@@ -546,45 +585,28 @@ def get_stu_detail_info(html):
 
     return detail_info
 
-
 def insert_detail_database(_lists,_database_info):
     '''
-    将学生详细信息的列表写入数据库
+    将数据写入数据库
 
-    :param _lists: 写入学生信息的列表
-    :param _database_info: 数据库基本信息
-
-
-    _database_info格式:
-        _databsae_info = {
-            'host':'XXX.XXX.XXX.XXX', #主机
-
-            'port':3306, #端口
-
-            'database':'XXXX',#数据库名称
-
-            'user':'XXXXX',#用户名
-
-            'password':'XXXXX',#密码
-
-            'charset':'utf8' #字符编码
-        }
-
-    :return: 正常返回0，写入发生异常返回-1
+    :param _lists: 数据的列表
+    :param _database_info: 数据库信息
+    :return: 成功返回0,失败返回-1
     '''
+
     try:
         # 创建Connection连接
         conn = connect(host=_database_info['host'], port= _database_info['port'],
                        database=_database_info['database'],user=_database_info['user'],
                        password=_database_info['password'],charset=_database_info['charset'])
         cs1 = conn.cursor()# 获得Cursor对象
-        i = 1
-        _len = len(_lists)
+        # place = 1
+        # _len = end_place(_lists)
         #定义sql语句模版
-        print("正在插入数据库...")
+        # print("正在插入数据库...")
         sql = "insert into students_detailed_table values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
         for _list in _lists:
-            # 拆分课程
+            # 拆分
             for courses in _list["stu_detail_info"]:
                 try:
                     param = ("default",
@@ -602,112 +624,339 @@ def insert_detail_database(_lists,_database_info):
                              courses["nos"],
                              courses["remark"],
                              )
-                    #print(param)
                     count = cs1.execute(sql, param)
                 except:
                     print("写入数据库发生错误,可能主键冲突！自动跳过这条信息")
                     continue
-            # 打印进度
-            percent = i / _len
-            i = i + 1
-            progress(percent)
-        print("提交数据库...")
+
         conn.commit()  # 提交之前的操作，如果之前已经之执行过多次的execute，那么就都进行提交
         cs1.close()# 关闭Cursor对象
         conn.close()# 关闭Connection对象
+        return 0
     except:
         print("数据库发生错误！请检查填写的信息！\n")
         return -1
-    print("提交成功")
+
+def read_file(path,type=0):
+    '''
+    读取文件信息
+
+    :param path: 文件路径
+    :param type: 文件类型,type=0时读取html文本,其他的时候读取json文件并转换成字典
+
+    :return:  成功返回读取到的没内容,失败返回0
+    '''
+    my_file = Path(path)
+    if my_file.is_file():
+        # 指定的文件存在
+        with open(path, 'r', encoding='utf-8') as f:
+            if type == 0:
+                file_contents = f.read()
+            else:
+                file_contents = json.load(f)
+        f.close()
+        return file_contents
+    else:
+        print('\n文件不存在...')
+        return 0
+
+def get_html_for_file(_cookie,_asc_ids,_file_list,_process_NO):
+    '''
+    批量获取网页并储存到文件里
+
+    :param _cookie: 管理员的cookie
+    :param _asc_ids: asc_id列表
+    :param _file_list: 文件序列，用来命名文件
+    :param _process_NO: 进程数
+    :return: 成功返回0
+    '''
+    time.sleep(random.randint(2,5)) #
+    i = 1
+    _len = len(_asc_ids)
+    time_beg = datetime.datetime.now()
+    process_str = "进程: {}".format(_process_NO + 1)
+    for asc_id in _asc_ids:
+        html = get_detailed_table_html(_cookie, asc_id)
+        if html == 404:
+            print("进程{}请求网页失败!位置为{}".format(_process_NO,i))
+            return i
+        with open(r'./data/html/_detail_table_html_' + str(_file_list[i-1]) + '.html', 'w', encoding='utf-8') as file_object:
+            file_object.write(html)
+        file_object.close()
+        # 打印进度
+        time_now = datetime.datetime.now()
+        # try:
+        progress(i, _len,process_str + get_remaining_time(time_beg, time_now, i, _len))
+        # except:
+        #     print("请求发生错误,错误位置为{},请检查对应文件时候为空,可能是cookie失效,进程号{}".format(i,_process_NO))
+        #     return -1
+        i = i + 1
+        time.sleep(2)
     return 0
 
 
 
+def analyze_html_for_file(_id_list,_process_NO):
+    '''
+    从文件解析html
 
-def get_detailed_table_info(cookie,asc_ids,database_info):
-    print("正在抓取学生成绩详细情况,会有多轮解析网页和数据库操作，时间会很长请去干别的事情")
-    waiting(5)
-    i = 1
-    _len = len(asc_ids)
+    :param _id_list: 分配的文件名列表
+    :param _process_NO: 进程数
+    :return: 成功返回0
+    '''
+
+    _length = len(_id_list)
     time_beg = datetime.datetime.now()
-    for asc_id in asc_ids:
+    process_str = "进程: {}".format(_process_NO + 1)
+    place = 1
 
-        print("正在请求网页...")
-        html = get_detailed_table_html(cookie,asc_id)
-        if html == 404:
-            print("请求失败!")
-            return 0
+    for i in _id_list:
+        html = read_file(r'./data/html/_detail_table_html_' + str(i) + '.html')
         soup = BeautifulSoup(html, 'html.parser')
-
-        # 测试用
-        # html = read_html()
-        # soup = BeautifulSoup(html, 'html.parser')
-        soup = soup.body.contents
 
         flag = 0
         sbi_dict = {}
         sdi_list = []
         all_list = []
-        print("正在解析网页信息...")
-        for content in soup:
+
+        for content in soup.body:
             if content.string == "西安石油大学学生成绩总表":
                 flag = 1
                 continue
             if flag == 1:
                 # 由于学生基本信息和成绩都紧挨着标题“西安石油大学学生成绩总表”，并且类型都为bs4.element.Tag
                 # 我们用这种方式将其区分
-                if isinstance(content,bs4.element.Tag):
+                if isinstance(content, bs4.element.Tag):
                     # 这里是学生基本信息
                     sbi_dict = get_stu_basic_info(str(content))
                     flag = 2
                     continue
             if flag == 2:
-                if isinstance(content,bs4.element.Tag):
+                if isinstance(content, bs4.element.Tag):
                     # 这里是学生的详细的信息
                     sdi_list = get_stu_detail_info(str(content))
                     flag = 0
             # 将这个学生的所有信息汇总到一个表里边
-            if len(sdi_list)!= 0 and len(sbi_dict) != 0:
+            if len(sdi_list) != 0 and len(sbi_dict) != 0:
                 all_info = {
-                    "stu_basic_info" : sbi_dict,
-                    "stu_detail_info" : sdi_list
+                    "stu_basic_info": sbi_dict,
+                    "stu_detail_info": sdi_list
                 }
                 all_list.append(all_info)
-        # 插入数据库
-        print("解析完成")
-        insert_detail_database(all_list,database_info)
+                sbi_dict = {} #清空字典
+                sdi_list = [] #清空列表
+                if all_info["stu_basic_info"]["name"] == "王世浩" :
+                    print(all_info)
+                    print("位置为{},进程{}".format(i,_process_NO))
 
-        percent = i / _len
-        i = i + 1
-        print("总进度:")
-        progress(percent)
+        with open(r'./data/list/_detail_table_list_' + str(i) + '.json', 'w', encoding='utf-8') as file_object:
+            file_object.write(json.dumps(all_list, indent=4, ensure_ascii=False))
+        file_object.close()
+
+        # 打印进度
         time_now = datetime.datetime.now()
-        print_time(time_beg,time_now,i,_len)
+        progress(place, _length, process_str + get_remaining_time(time_beg, time_now, place, _length))
+        place = place + 1
+
+    return 0
+
+def insert_database_from_file(_id_list,_database_info,_process_NO):
+    '''
+    读取解析完成的文件信息，插入数据库
+
+    :param _id_list: 分配文件名列表
+    :param _database_info: 数据库信息
+    :param _process_NO: 进程数
+    :return: 成功返回0
+    '''
+
+    _length = len(_id_list)
+    time_beg = datetime.datetime.now()
+    place = 1
+
+    process_str = "进程: {}".format(_process_NO+1)
+
+    for i in _id_list:
+
+        file_info = read_file(r'./data/list/_detail_table_list_' + str(i) + '.json',1)
+        # all_list = json.loads(list_)
+        # 插入数据库
+        insert_detail_database(file_info, _database_info)
+        time_now = datetime.datetime.now()
+        progress(place,_length, process_str + get_remaining_time(time_beg, time_now, place, _length))
+        place = place + 1
+
+    return 0
+
+def allocation_process(_lists,_process_num):
+    '''
+    根据进程分配任务
+
+    :param _lists: 需要分配任务的列表
+    :param _process_num: 进程数
+    :return:
+    '''
+
+    all_list = [] #创建一个总列表用来返回
+    _lenght = len(_lists)
+    # 几个进程往总的列表里边添加几个子列表
+    for i in range(_process_num):
+        _process_list = []
+        all_list.append(_process_list)
+
+    i = 1
+    for _list in _lists:
+        flag =   i % _process_num # flag = 顺序数 余 进程数
+        i = i + 1
+        all_list[flag].append(_list)
+
+    return all_list
 
 
 
 
-# 读取本地文件,测试用
-def read_html(path=r'./总表.html'):
-    my_file = Path(path)
-    if my_file.is_file():
-        # 指定的文件存在
-        with open(path, 'r', encoding='utf-8') as f:
-            html = f.read()
-        f.close()
-        return html
-    else:
-        print('文件不存在...')
-        return 0
+def operate_detailed_table_info(cookie, asc_ids, database_info,process_num = 6,
+                                _get_html=True,_analyze_html=True,_insert_database=True):
 
+    '''
+    学习成绩信息业务操作
 
+    :param cookie: 教务系统管理员的cookie
+    :param asc_ids: asc_id 列表
+    :param database_info: 数据库信息
+    :param process_num: 进程数，默认为6
+    :param _get_html: 是否请求网页
+    :param _analyze_html: 是否解析网页
+    :param _insert_database: 是否插入数据库
+    :return: 成功返回0
+    '''
 
-def xsyu_detailed(cookie, database_info):
+    _len = len(asc_ids)
+    # print("正在抓取学生成绩详细情况,会有多轮解析网页和数据库操作，时间会很长请去干别的事情...")
+    # waiting(5)
+    ################################################################################
+    if _get_html == False:
+        print("正在请求网页并且保存...")
+        path = r'./data/html'
+        if os.path.isdir(path):
+            print("发现存在./data/html目录,正在删除")
+            ls = os.listdir(path)
+            for i in ls:
+                c_path = os.path.join(path, i)
+                if os.path.isdir(c_path):
+                    del_file(c_path)
+                else:
+                    os.remove(c_path)
+            os.rmdir(path)
+            print("重新创建./data/html目录")
+            os.mkdir(path)
+
+        print("分配多进程任务...进程数:{}".format(process_num))
+        get_html_process_list = allocation_process(asc_ids, process_num)  # 给每个进程分配需要请求的asc id列表
+        l = []
+        for i in range(1, _len + 1):
+            l.append(i)
+        get_html_process_file_list = allocation_process(l, process_num) # 分配插入文件命名位置
+
+        p = Pool(process_num)
+        for i in range(process_num):
+            p.apply_async(get_html_for_file, args=(cookie,get_html_process_list[i],get_html_process_file_list[i], i))
+        p.close()
+        p.join()
+
+        # p = []
+        #
+        # for i in range(process_num):
+        #     print("正在生成进程{}".format(i+1))
+        #     waiting(4)  # 等待防止过快请求
+        #     p.append(mp.Process(target=get_html_for_file, args=(cookie,get_html_process_list[i],get_html_process_file_list[i], i)))
+        #     p[i].start()
+        #
+        # for i in range(process_num):
+        #     p[i].join()
+
+    #################################################################################
+    if _analyze_html == False:
+        print("所有网页保存完成,现在开始解析数据..")
+        path = r'./data/list'
+        if os.path.isdir(path):
+            print("发现存在./data/list目录,正在删除")
+            ls = os.listdir(path)
+            for i in ls:
+                c_path = os.path.join(path, i)
+                if os.path.isdir(c_path):
+                    del_file(c_path)
+                else:
+                    os.remove(c_path)
+            os.rmdir(path)
+            print("重新创建./data/list目录")
+            os.mkdir(path)
+
+        print("分配多进程任务...进程数:{}".format(process_num))
+        l = []
+        for i in range(1, _len + 1):
+            l.append(i)
+        analyze_process_list = allocation_process(l, process_num)  # 先分配任务
+
+        # p = []
+        # for i in range(process_num):
+        #     p.append(mp.Process(target=analyze_html_for_file, args=(analyze_process_list[i],i)))
+        #     p[i].start()
+        # for i in range(process_num):
+        #     p[i].join()
+
+        p = Pool(process_num)
+        for i in range(process_num):
+            p.apply_async(analyze_html_for_file, args=(analyze_process_list[i],i))
+        print("等待解析结束...")
+        p.close()
+        p.join()
+
+    #################################################################################
+    if _insert_database == True:
+        print("解析完成正在写入数据库...")
+        path = r'./data/list'
+        if os.path.isdir(path):
+            print("分配多进程任务,进程数:{}".format(process_num))
+            l = []
+            for i in range(1,_len+1):
+                l.append(i)
+            database_process_list = allocation_process(l,process_num) #先分配任务
+
+            p = []
+            for i in range(process_num):
+                p.append(mp.Process(target=insert_database_from_file, args=(database_process_list[i],database_info,i)))
+                p[i].start()
+            for i in range(process_num):
+                p[i].join()
+
+            # p = Pool(process_num)
+            # for i in range(process_num):
+            #     p.apply_async(insert_database_from_file, args=(database_process_list[i],database_info,i))
+            # print("等待写入结束...")
+            # p.close()
+            # p.join()
+            #
+
+            print("写入完成")
+
+        else:
+            print("文件不存在")
+            return -1
+    print("结束")
+    return 0
+
+def xsyu_detailed(cookie, database_info,process_num = mp.cpu_count(),
+                  get_html=True,analyze_html=True,insert_database=True):
     '''
     学生成绩详细列表
 
     :param cookie: 需要为管理员的cookie,格式为semester.id + JSESSIONID,注意如果没有semester.id默认会打印所有学生包括已经毕业的
     :param database_info: 数据库基本信息
+    :param process_num: 进程数量,默认为CPU内核数量
+    :param get_html: 是否请求网页
+    :param analyze_html: 是否解析网页
+    :param insert_database: 是否写入数据库
 
     database_info格式:
         databsae_info = {
@@ -724,7 +973,7 @@ def xsyu_detailed(cookie, database_info):
             'charset':'utf8' #字符编码
         }
 
-    :return:暂时返回0
+    :return:成功回0
     '''
 
     #先取得asc_id列表
@@ -732,8 +981,10 @@ def xsyu_detailed(cookie, database_info):
     # 切片分组
     if asc_list != 0:
         # 此时asc_list格式已经转换
-        asc_list = cut_asc_id(asc_list)
-        get_detailed_table_info(cookie, asc_list, database_info)
+        asc_list = cut_asc_id(asc_list,100)
+        flag = operate_detailed_table_info(cookie, asc_list, database_info,process_num,
+                                           get_html,analyze_html,insert_database)
+
     else:
         return 0
 
