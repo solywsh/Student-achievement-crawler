@@ -82,7 +82,27 @@ create table students_detailed_table(
 
 ## 基本使用
 
+### 环境安装
+
+由于使用的的是`pip freeze > requirements.txt`一键生成的依赖，所以估计环境的所有包都被搞上去了，如果嫌麻烦可以用下面命令把所有包都给装上：
+
+```shell
+pip install -r requirement.txt
+```
+
+如果你不想装其他包，下面我列举了写可能需要装的：
+
+```
+pymysql
+requests
+BeautifulSoup4
+```
+
+### 在主函数调用
+
 大部功能已经封装在`xsyu_summary()`和`xsyu_detailed()`上，一些参数已经带了默认属性，所以在主函数上简单配置即可使用：
+
+**需要注意的是**：我把代码都放在了`./syu_sac/syu_sac.py`文件里，需要import导入。
 
 在main.py里边
 
@@ -93,7 +113,7 @@ cookie = {
     # 注意，如果直接以'JSESSIONID=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'形式传入students_summary_table(_cookie,_database_info)
     # 而不传入semester.id，那么将会爬取数据库所有学生的信息
     'semester.id': 142,
-    'JSESSIONID': '88FA318A80D24A19DD2C320B5DA41668.-node1'
+    'JSESSIONID': 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.-node11'
 }
 
 # 数据库信息
@@ -105,6 +125,42 @@ database_info = {
     'password': 'sditr',  # 密码
     'charset': 'utf8'  # 字符编码
 }
+```
+
+#### 主函数DEMO
+
+> demo我已经写在了main.py文件里边了
+
+```python
+from xsyu_sac.xsyu_sac import *
+
+# cookie信息
+cookie = {
+    # semester.id学期代码,只会抓取这学期有效的人数
+    # 注意，如果直接以'JSESSIONID=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'形式传入students_summary_table(_cookie,_database_info)
+    # 而不传入semester.id，那么将会爬取数据库所有学生的信息
+    'semester.id': 142,
+    'JSESSIONID': 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.-node1'
+}
+
+# 数据库信息
+database_info = {
+    'host': '192.168.123.5',  # 主机地址
+    'port': 3306,  # 端口
+    'database': '',  # 数据库名称
+    'user': '',  # 用户名
+    'password': '',  # 密码
+    'charset': 'utf8'  # 字符编码
+}
+
+
+if __name__ == '__main__':
+    _cookie = 'semester.id=' + str(cookie['semester.id']) + '; JSESSIONID=' + cookie['JSESSIONID']
+    # 学生汇总列表
+    xsyu_summary(_cookie,database_info)
+    # # 学生详细列表
+    xsyu_detailed(_cookie, database_info)
+
 ```
 
 ## 详细参数
