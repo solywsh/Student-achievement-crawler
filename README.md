@@ -104,28 +104,23 @@ BeautifulSoup4
 
 **需要注意的是**：我把代码都放在了`./syu_sac/syu_sac.py`文件里，需要import导入。
 
-在main.py里边
+在main.py里边，填入`cookie信息和数据库信息`
 
 ```python
 # cookie信息
-cookie = {
-    # semester.id学期代码,只会抓取这学期有效的人数
-    # 注意，如果直接以'JSESSIONID=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'形式传入students_summary_table(_cookie,_database_info)
-    # 而不传入semester.id，那么将会爬取数据库所有学生的信息
-    'semester.id': 142,
-    'JSESSIONID': 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.-node11'
-}
-
+cookie = "semester.id=142; JSESSIONID=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 # 数据库信息
 database_info = {
-    'host': '192.168.123.5',  # 主机
+    'host': '',  # 主机
     'port': 3306,  # 端口
-    'database': 'study',  # 数据库名称
-    'user': 'study',  # 用户名
-    'password': 'sditr',  # 密码
+    'database': '',  # 数据库名称
+    'user': '',  # 用户名
+    'password': '',  # 密码
     'charset': 'utf8'  # 字符编码
 }
 ```
+
+其中，`cookie`的`semester.id`为学期
 
 #### 主函数DEMO
 
@@ -135,17 +130,10 @@ database_info = {
 from xsyu_sac.xsyu_sac import *
 
 # cookie信息
-cookie = {
-    # semester.id学期代码,只会抓取这学期有效的人数
-    # 注意，如果直接以'JSESSIONID=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'形式传入students_summary_table(_cookie,_database_info)
-    # 而不传入semester.id，那么将会爬取数据库所有学生的信息
-    'semester.id': 142,
-    'JSESSIONID': 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX.-node1'
-}
-
+cookie = "semester.id=142; JSESSIONID=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 # 数据库信息
 database_info = {
-    'host': '192.168.123.5',  # 主机地址
+    'host': '',  # 主机
     'port': 3306,  # 端口
     'database': '',  # 数据库名称
     'user': '',  # 用户名
@@ -154,12 +142,23 @@ database_info = {
 }
 
 
-if __name__ == '__main__':
-    _cookie = 'semester.id=' + str(cookie['semester.id']) + '; JSESSIONID=' + cookie['JSESSIONID']
+def main():
+    temp_time = datetime.datetime.strptime('00:00:00', '%H:%M:%S')
+    time_beg = datetime.datetime.now()
+
     # 学生汇总列表
-    xsyu_summary(_cookie,database_info)
+    xsyu_summary(cookie, database_info)
     # # 学生详细列表
-    xsyu_detailed(_cookie, database_info)
+    xsyu_detailed(cookie, database_info)
+
+    time_now = datetime.datetime.now()
+    time_spend = time_now - time_beg
+    time_spend = temp_time + time_spend
+    print("完成!共花费:{}".format(time_spend))
+
+
+if __name__ == '__main__':
+    main()
 
 ```
 
@@ -190,7 +189,34 @@ def xsyu_detailed(cookie, database_info,
 
 - param cookie: 需要为管理员的cookie,格式为semester.id + JSESSIONID,注意如果没有semester.id默认会打印所有学生包括已经毕业的
 - param database_info: 数据库基本信息，用来读取asc_id信息，所以在运行`xsyu_detailed()`之前**必须运行**`xsyu_summary()`把学生基本信息写入数据库
-- param process_num: 进程数量,默认为CPU内核数量
+- param process_num: **进程数量**,默认为CPU内核数量`mp.cpu_count()`
 - param get_html: 是否请求网页
 - param analyze_html: 是否解析网页
 - param insert_database: 是否写入数据库
+
+### 不抓取有效学生而是抓取所有学生
+
+> 注意，由于学校防爬机制等一些原因，虽然我尽可能地让程序稳定，**但是这样仍然可能会降低程序的稳定性**，一些信息将会因为程序的稳定机制而跳过。
+
+由于`xsyu_detailed()`抓取学生详细成绩是根据`xsyu_summary()`得到的asc_id来的，所以我们需要控制`xsyu_summary()`得到教务系统里边所有学生的asc_id，在`./xsyu_sac/xsyu_sac.py`文件下，找到`get_summary_table_html()`函数，将：
+
+```python
+Hpostdata = {
+        'orderBy': 'std.code asc',
+        'std.project.id': 1,
+        'stdActive': 1,
+        'pageNo': pageNO,
+        'pageSize': pageSize
+    }
+```
+
+改为：
+
+```python
+Hpostdata = {
+        'pageNo': pageNO,
+        'pageSize': pageSize
+    }
+```
+
+即可。

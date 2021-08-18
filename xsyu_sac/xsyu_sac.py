@@ -208,6 +208,12 @@ def get_summary_table_html(cookie,pageNO=1,pageSize=20):
         'pageNo': pageNO,
         'pageSize': pageSize
     }
+
+    # # 如果使用这个会请求所有学生
+    # Hpostdata = {
+    #     'pageNo': pageNO,
+    #     'pageSize': pageSize
+    # }
     try:
         s = requests.session()
         r = s.post(url,data=Hpostdata, headers=headers)
@@ -216,6 +222,7 @@ def get_summary_table_html(cookie,pageNO=1,pageSize=20):
         return r.text
     except:
         return 404
+
 
 def get_summary_table_info(html):
     '''
@@ -241,18 +248,24 @@ def get_summary_table_info(html):
                         prof_d = table.contents[9].string
                     #匹配教务系统的顺序id
                     esa_id = int(re.search(r"[0-9]+", str(table)).group(0))
-                    info_dict = {
-                        "esa_id" : esa_id,
-                        "stuid" : table.contents[1].a.string,
-                        "name": table.contents[2].contents[1].string,
-                        "gender": table.contents[4].string, #性别
-                        "grede": int(table.contents[5].string), #年级
-                        "faculty": table.contents[6].string, #学院
-                        "major": table.contents[7].string, #专业
-                        "_class": table.contents[8].string,  # 班级
-                        "prof_d": prof_d  # 专业方向
-                    }
-                    info_list.append(info_dict)
+                    try:
+                        info_dict = {
+                            "esa_id" : esa_id,
+                            "stuid" : table.contents[1].a.string,
+                            "name": table.contents[2].contents[1].string,
+                            "gender": table.contents[4].string, #性别
+                            "grede": int(table.contents[5].string), #年级
+                            "faculty": table.contents[6].string, #学院
+                            "major": table.contents[7].string, #专业
+                            "_class": table.contents[8].string,  # 班级
+                            "prof_d": prof_d  # 专业方向
+                        }
+                        info_list.append(info_dict)
+                    except:
+                        # 有个别（其实只有一个）的学号为2015-6这种格式，因为数据库年级格式设计为YEAR，所以没办法存入
+                        # 懒得改数据库格式了，所以不想弄，直接跳过好了
+                        print("\n字符存入发生错误,已经自动跳过,错误字段为:",table.contents)
+                        continue
         return info_list
     else:
         print("访问过快，触发教务系统限制:请不要过快点击")
@@ -279,22 +292,24 @@ def insert_summary_database(_lists, _database_info):
         _len = len(_lists)
         #定义sql语句模版
         sql = "insert into students_summary_table values(%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        time_beg = datetime.datetime.now()
         for _list in _lists:
             try:
                 param = (_list["esa_id"], _list["stuid"], _list["name"], _list["gender"],
                          _list["grede"], _list["faculty"], _list["major"], _list["_class"], _list["prof_d"])
                 count = cs1.execute(sql, param)
                 # 打印进度
+                time_now = datetime.datetime.now()
+                progress(i,_len, get_remaining_time(time_beg, time_now, i, _len))
                 i = i + 1
-                progress(i,_len)
             except:
-                print("写入数据库发生错误,可能主键冲突！自动跳过这条信息")
+                print("\n写入数据库发生错误,可能主键冲突！自动跳过这条信息")
                 continue
         conn.commit()  # 提交之前的操作，如果之前已经之执行过多次的execute，那么就都进行提交
         cs1.close()# 关闭Cursor对象
         conn.close()# 关闭Connection对象
     except:
-        print("数据库发生错误！请检查填写的信息！\n")
+        print("\n数据库发生错误！请检查填写的信息！\n")
         return -1
 
     return 0
@@ -327,23 +342,26 @@ def xsyu_summary(cookie, database_info,
 
     :return: 如果插入数据库，成功之后返回0,如果不插入，则返回汇总列表lists
     '''
+    PAGE_SIZE = 1000 #每页学生人数
+
     #先解析一下网页，计算需要翻多少页
     summary_table_html = get_summary_table_html(cookie)
-    page_rst = get_page_num(summary_table_html)
+    page_rst = get_page_num(summary_table_html,PAGE_SIZE)
 
     if page_rst!=404:
         if get_table == True:
             waiting()  # 过快访问教务系统会显示“请不要过快点击”,先等待
-
+            time_beg = datetime.datetime.now()
             lists = [] #创建列表用于存储所有学生信息
             print("抓取学生汇总信息中...")
             for i in range(1,page_rst['page_num']+1):
-                summary_table_html = get_summary_table_html(cookie,i,100)
+                summary_table_html = get_summary_table_html(cookie,i,PAGE_SIZE)
                 # 得到含有学生信息的列表
                 list_temp = get_summary_table_info(summary_table_html)
                 lists = lists + list_temp
                 #打印进度
-                progress(i,page_rst['page_num'])
+                time_now = datetime.datetime.now()
+                progress(i,page_rst['page_num'],get_remaining_time(time_beg, time_now, i, page_rst['page_num']))
                 time.sleep(0.1)
             #如果不写入数据库就返回信息的列表_list
             if insert_table == True and lists != 0:
@@ -397,6 +415,7 @@ def get_asc_id(_database_info):
             if count != 0:
                 # 生成列表
                 asc_id_list = []
+                time_beg = datetime.datetime.now()
                 for i in range(count):
                     # 获取查询的结果,返回的结果是元组
                     result = cs1.fetchone()
@@ -404,7 +423,8 @@ def get_asc_id(_database_info):
                     asc_id_list.append(result[0])
 
                     # 打印进度
-                    progress(i+1,count)
+                    time_now = datetime.datetime.now()
+                    progress(i+1,count,get_remaining_time(time_beg, time_now, i+1, count))
 
                 # 关闭Cursor对象
                 cs1.close()
@@ -437,6 +457,7 @@ def cut_asc_id(_sac_id_list,step=20):
     beg = 0 #定义第一个列表的开始
     end = step #定义第一个列表的结束
     sac_ids = []
+    time_beg = datetime.datetime.now()
     for i in range(1,cut_num+1):
         # 判断是否为最后一组，如果为最后一组，那么切片结尾为列表的最后
         if end >= len(_sac_id_list):
@@ -455,7 +476,8 @@ def cut_asc_id(_sac_id_list,step=20):
         end = end + step
 
         # 打印进度
-        progress(i,cut_num)
+        time_now = datetime.datetime.now()
+        progress(i,cut_num,get_remaining_time(time_beg, time_now, i, cut_num))
 
 
     return sac_ids
@@ -512,7 +534,6 @@ def get_detailed_table_html(cookie,sac_ids_str):
             else:
                 return r.text
     except:
-        print("\n网页解析错误!")
         return 404
 
 def get_stu_basic_info(html):
@@ -626,7 +647,7 @@ def insert_detail_database(_lists,_database_info):
                              )
                     count = cs1.execute(sql, param)
                 except:
-                    print("写入数据库发生错误,可能主键冲突！自动跳过这条信息")
+                    print("\n写入数据库发生错误,可能主键冲突！自动跳过这条信息")
                     continue
 
         conn.commit()  # 提交之前的操作，如果之前已经之执行过多次的execute，那么就都进行提交
@@ -634,7 +655,7 @@ def insert_detail_database(_lists,_database_info):
         conn.close()# 关闭Connection对象
         return 0
     except:
-        print("数据库发生错误！请检查填写的信息！\n")
+        print("\n数据库发生错误！请检查填写的信息！\n")
         return -1
 
 def read_file(path,type=0):
@@ -675,11 +696,28 @@ def get_html_for_file(_cookie,_asc_ids,_file_list,_process_NO):
     _len = len(_asc_ids)
     time_beg = datetime.datetime.now()
     process_str = "进程: {}".format(_process_NO + 1)
+
+    MAX_RE_TIMES = 4 #最大重试次数
     for asc_id in _asc_ids:
-        html = get_detailed_table_html(_cookie, asc_id)
-        if html == 404:
-            print("进程{}请求网页失败!位置为{}".format(_process_NO,i))
-            return i
+        RE_TIME = 0  # 现在的重试次数
+        while(True):
+            html = get_detailed_table_html(_cookie, asc_id)
+            if html == "":
+                _cookie= input("\ncookie可能失效请重新输入cookie:")
+                continue
+            if html == 404 and RE_TIME < MAX_RE_TIMES:
+                RE_TIME = RE_TIME + 1
+                print("\n进程{}请求网页失败!位置为{},正在第{}次重试...".format(_process_NO,i,RE_TIME))
+                time.sleep(random.randint(7))
+            else:
+                if RE_TIME >= MAX_RE_TIMES:
+                    print("\n进程{}请求{}失败次数超过最大次数,自动跳过这一网页".format(_process_NO,i))
+                else:
+                    break
+        # 多次请求失败跳过这个网页,但是不关闭这个进程
+        if RE_TIME >= MAX_RE_TIMES:
+            i = i + 1
+            continue
         with open(r'./data/html/_detail_table_html_' + str(_file_list[i-1]) + '.html', 'w', encoding='utf-8') as file_object:
             file_object.write(html)
         file_object.close()
@@ -718,36 +756,49 @@ def analyze_html_for_file(_id_list,_process_NO):
         sbi_dict = {}
         sdi_list = []
         all_list = []
-
-        for content in soup.body:
-            if content.string == "西安石油大学学生成绩总表":
-                flag = 1
-                continue
-            if flag == 1:
-                # 由于学生基本信息和成绩都紧挨着标题“西安石油大学学生成绩总表”，并且类型都为bs4.element.Tag
-                # 我们用这种方式将其区分
-                if isinstance(content, bs4.element.Tag):
-                    # 这里是学生基本信息
-                    sbi_dict = get_stu_basic_info(str(content))
-                    flag = 2
+        if soup.body != None:
+            for content in soup.body:
+                if content.string == "西安石油大学学生成绩总表":
+                    flag = 1
                     continue
-            if flag == 2:
-                if isinstance(content, bs4.element.Tag):
-                    # 这里是学生的详细的信息
-                    sdi_list = get_stu_detail_info(str(content))
-                    flag = 0
-            # 将这个学生的所有信息汇总到一个表里边
-            if len(sdi_list) != 0 and len(sbi_dict) != 0:
-                all_info = {
-                    "stu_basic_info": sbi_dict,
-                    "stu_detail_info": sdi_list
-                }
-                all_list.append(all_info)
-                sbi_dict = {} #清空字典
-                sdi_list = [] #清空列表
-                if all_info["stu_basic_info"]["name"] == "王世浩" :
-                    print(all_info)
-                    print("位置为{},进程{}".format(i,_process_NO))
+                if flag == 1:
+                    # 由于学生基本信息和成绩都紧挨着标题“西安石油大学学生成绩总表”，并且类型都为bs4.element.Tag
+                    # 我们用这种方式将其区分
+                    if isinstance(content, bs4.element.Tag):
+                        # 这里是学生基本信息
+                        sbi_dict = get_stu_basic_info(str(content))
+                        flag = 2
+                        continue
+                if flag == 2:
+                    if isinstance(content, bs4.element.Tag):
+                        # 这里是学生的详细的信息
+                        sdi_list = get_stu_detail_info(str(content))
+                        flag = 0
+                # 将这个学生的所有信息汇总到一个表里边
+                if len(sdi_list) != 0 and len(sbi_dict) != 0:
+                    all_info = {
+                        "stu_basic_info": sbi_dict,
+                        "stu_detail_info": sdi_list
+                    }
+                    all_list.append(all_info)
+                    sbi_dict = {} #清空字典
+                    sdi_list = [] #清空列表
+
+                    # # 找出某个人
+                    # if all_info["stu_basic_info"]["stuid"] == "" :
+                    #     print(all_info)
+                    #     print("\n位置为{},进程{}".format(i,_process_NO))
+
+        else:
+            print("\n进程{}读取网页{}失败,网页信息为空!".format(_process_NO,i))
+            all_info = {
+                "stu_basic_info": sbi_dict,
+                "stu_detail_info": sdi_list
+            }
+            all_list.append(all_info)
+            sbi_dict = {}  # 清空字典
+            sdi_list = []  # 清空列表
+
 
         with open(r'./data/list/_detail_table_list_' + str(i) + '.json', 'w', encoding='utf-8') as file_object:
             file_object.write(json.dumps(all_list, indent=4, ensure_ascii=False))
@@ -814,7 +865,6 @@ def allocation_process(_lists,_process_num):
 
 
 
-
 def operate_detailed_table_info(cookie, asc_ids, database_info,process_num = 6,
                                 _get_html=True,_analyze_html=True,_insert_database=True):
 
@@ -835,7 +885,7 @@ def operate_detailed_table_info(cookie, asc_ids, database_info,process_num = 6,
     # print("正在抓取学生成绩详细情况,会有多轮解析网页和数据库操作，时间会很长请去干别的事情...")
     # waiting(5)
     ################################################################################
-    if _get_html == False:
+    if _get_html == True:
         print("正在请求网页并且保存...")
         path = r'./data/html'
         if os.path.isdir(path):
@@ -876,7 +926,11 @@ def operate_detailed_table_info(cookie, asc_ids, database_info,process_num = 6,
         #     p[i].join()
 
     #################################################################################
-    if _analyze_html == False:
+    if _analyze_html == True:
+        # 由于在python shell里边有时会出现子进程刹不住的情况（上面p.jion()有时并不起作用）
+        # 为了防止网页还没解析完就开始上传数据库，这里设置一个循环来检查目标目录的html文件是否已经生成完毕
+        while ((len(os.listdir(r'./data/html')) != _len)):
+                time.sleep(1)
         print("所有网页保存完成,现在开始解析数据..")
         path = r'./data/list'
         if os.path.isdir(path):
@@ -898,22 +952,29 @@ def operate_detailed_table_info(cookie, asc_ids, database_info,process_num = 6,
             l.append(i)
         analyze_process_list = allocation_process(l, process_num)  # 先分配任务
 
-        # p = []
-        # for i in range(process_num):
-        #     p.append(mp.Process(target=analyze_html_for_file, args=(analyze_process_list[i],i)))
-        #     p[i].start()
-        # for i in range(process_num):
-        #     p[i].join()
-
-        p = Pool(process_num)
+        p = []
         for i in range(process_num):
-            p.apply_async(analyze_html_for_file, args=(analyze_process_list[i],i))
-        print("等待解析结束...")
-        p.close()
-        p.join()
+            p.append(mp.Process(target=analyze_html_for_file, args=(analyze_process_list[i],i)))
+            p[i].start()
+        for i in range(process_num):
+            p[i].join()
+
+        # p = Pool(process_num)
+        # for i in range(process_num):
+        #     p.apply_async(analyze_html_for_file, args=(analyze_process_list[i],i))
+        # print("等待解析结束...")
+        # p.close()
+        # for i in range(process_num):
+        #     p.join()
 
     #################################################################################
     if _insert_database == True:
+
+        # 由于在python shell里边有时会出现子进程刹不住的情况（上面p.jion()有时并不起作用）
+        # 为了防止网页还没解析完就开始上传数据库，这里设置一个循环来检查目标目录的json文件是否已经生成完毕
+        while ((len(os.listdir(r'./data/list')) != _len)):
+                time.sleep(1)
+
         print("解析完成正在写入数据库...")
         path = r'./data/list'
         if os.path.isdir(path):
